@@ -5,4 +5,7 @@ string text
 #result definition
 ---
 #feedback
+# word, marker
+string transcription_type
+# The actual thing
 string last_said

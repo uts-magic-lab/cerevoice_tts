@@ -83,6 +83,7 @@ private:
 
   std::string constructXml(std::string text, std::string voice);
 
+
 public:
   CerevoiceTts();
   ~CerevoiceTts();
@@ -103,6 +104,11 @@ public:
   void executeCB(const cerevoice_tts_msgs::TtsGoalConstPtr &goal);
 
   void preemptCB();
+
+  void timerCallback(const ros::WallTimerEvent& event, const cerevoice_tts_msgs::TtsFeedback feedback);
+
+  std::vector<ros::WallTimer > timers_;
+
 };
 
 } /* namespace cerevoice_tts */

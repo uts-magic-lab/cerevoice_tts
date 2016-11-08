@@ -1,4 +1,4 @@
-/*********************************************************************
+﻿/*********************************************************************
 * Software License Agreement (BSD License)
 *
 *  Copyright (c) 2014, Hochschule Ravensburg-Weingarten
@@ -50,7 +50,7 @@ namespace cerevoice_tts
 CerevoiceTts::CerevoiceTts() : channel_handle_(0), player_(NULL),
     action_server_(
         node_handle_,
-        "TTS",
+        "tts",
         boost::bind(&CerevoiceTts::executeCB, this, _1),
         false)
 {
@@ -66,6 +66,10 @@ CerevoiceTts::~CerevoiceTts()
     CPRC_sc_player_delete(player_);
 
   CPRCEN_engine_delete(engine_);
+}
+
+void CerevoiceTts::timerCallback(const ros::WallTimerEvent& event, const cerevoice_tts_msgs::TtsFeedback feedback){
+    action_server_.publishFeedback(feedback);
 }
 
 void CerevoiceTts::channelCallback(CPRC_abuf * audio_buffer, void * user_data)
@@ -92,6 +96,58 @@ void CerevoiceTts::channelCallback(CPRC_abuf * audio_buffer, void * user_data)
     else
     {
       ROS_ERROR("Can't play audio! Pointer to player is NULL!");
+    }
+
+    // Taken from the docs
+    for(int i = 0; i < CPRC_abuf_trans_sz(audio_buffer); i++) {
+        cerevoice_tts_msgs::TtsFeedback f;
+        transcription_buffer = CPRC_abuf_get_trans(audio_buffer, i);
+        float start = CPRC_abuf_trans_start(transcription_buffer); /* Start time in seconds */
+        float end = CPRC_abuf_trans_end(transcription_buffer); /* End time in seconds */
+        const char * name = CPRC_abuf_trans_name(transcription_buffer); /* Label, type dependent */
+        if (CPRC_abuf_trans_type(transcription_buffer) == CPRC_ABUF_TRANS_PHONE)
+        {
+          ROS_DEBUG("INFO: phoneme: %.3f %.3f %s\n", start, end, name);
+          // f.transcription_type = "phoneme";
+          // f.last_said = name;
+        }
+        else if (CPRC_abuf_trans_type(transcription_buffer) == CPRC_ABUF_TRANS_WORD)
+        {
+          ROS_INFO("INFO: word: %.3f %.3f %s\n", start, end, name);
+          f.transcription_type = "word";
+          f.last_said = name;
+          ros::WallTimer wt = tts_object->node_handle_.createWallTimer(ros::WallDuration(end),
+                                       boost::bind(&CerevoiceTts::timerCallback,
+                                                   tts_object,
+                                                   _1,
+                                                   f),
+                                                   true, // one shot
+                                                   true); // autostart
+         tts_object->timers_.push_back(wt);
+        }
+        else if (CPRC_abuf_trans_type(transcription_buffer) == CPRC_ABUF_TRANS_MARK)
+        {
+          ROS_INFO("INFO: marker: %.3f %.3f %s\n", start, end, name);
+          f.transcription_type = "marker";
+          f.last_said = name;
+          ros::WallTimer wt = tts_object->node_handle_.createWallTimer(ros::WallDuration(end),
+                                       boost::bind(&CerevoiceTts::timerCallback,
+                                                   tts_object,
+                                                   _1,
+                                                   f),
+                                                   true,
+                                                   true);
+          tts_object->timers_.push_back(wt);
+        }
+        else if (CPRC_abuf_trans_type(transcription_buffer) == CPRC_ABUF_TRANS_ERROR)
+        {
+          ROS_ERROR("ERROR: could not retrieve transcription at '%d'", i);
+          //f.transcription_type = "error";
+          //node_handle_.createWallTimer(ros::Duration(end - start));
+        }
+
+
+        //tts_object->action_server_.publishFeedback(f);
     }
   }
 }
@@ -276,11 +332,14 @@ void CerevoiceTts::executeCB(const cerevoice_tts_msgs::TtsGoalConstPtr &goal)
   }
 
   // Wait till completion
-  while(CPRC_sc_audio_busy(player_))
+  while(CPRC_sc_audio_busy(player_)){
     CPRC_sc_sleep_msecs(AUDIO_SLEEP_TIME);
+  }
 
   if(action_server_.isActive())
     action_server_.setSucceeded(result);
+
+  timers_.clear();
 }
 
 void CerevoiceTts::preemptCB()
@@ -306,6 +365,8 @@ void CerevoiceTts::preemptCB()
     ROS_ERROR("Player is NULL!");
 
   action_server_.setPreempted();
+
+  timers_.clear();
 }
 
 std::string CerevoiceTts::constructXml(std::string text, std::string voice)
