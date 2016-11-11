@@ -109,6 +109,8 @@ public:
 
   std::vector<ros::WallTimer > timers_;
 
+  float speak_time;
+
 };
 
 } /* namespace cerevoice_tts */

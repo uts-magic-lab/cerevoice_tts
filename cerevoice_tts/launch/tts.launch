@@ -14,4 +14,6 @@
     lexicon: $(find cerevoice_sdk)/example_data/additional.lex
   </rosparam>
   <node name="cerevoice_tts_node" pkg="cerevoice_tts" type="cerevoice_tts_node" respawn="false" output="screen" />
+
+  <node name="robotsound_to_cerevoice" pkg="cerevoice_tts" type="robotsound_to_cerevoice.py" output="screen"/>
 </launch>

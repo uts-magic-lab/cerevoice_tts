@@ -70,6 +70,16 @@ CerevoiceTts::~CerevoiceTts()
 
 void CerevoiceTts::timerCallback(const ros::WallTimerEvent& event, const cerevoice_tts_msgs::TtsFeedback feedback){
     action_server_.publishFeedback(feedback);
+
+    for(int i=0;i < timers_.size();i++){
+        if (timers_[i].hasPending()){
+            ROS_WARN_STREAM("timerCallback: timer " << i << " hasPending...");
+             //sleep(0.02);
+        }
+        else{
+            ROS_INFO_STREAM("timerCallback: timer " << i << " NOT hasPending.");
+        }
+    }
 }
 
 void CerevoiceTts::channelCallback(CPRC_abuf * audio_buffer, void * user_data)
@@ -98,12 +108,17 @@ void CerevoiceTts::channelCallback(CPRC_abuf * audio_buffer, void * user_data)
       ROS_ERROR("Can't play audio! Pointer to player is NULL!");
     }
 
+    float last_end = 0;
     // Taken from the docs
     for(int i = 0; i < CPRC_abuf_trans_sz(audio_buffer); i++) {
         cerevoice_tts_msgs::TtsFeedback f;
         transcription_buffer = CPRC_abuf_get_trans(audio_buffer, i);
         float start = CPRC_abuf_trans_start(transcription_buffer); /* Start time in seconds */
         float end = CPRC_abuf_trans_end(transcription_buffer); /* End time in seconds */
+
+        start += tts_object->speak_time;
+        end += tts_object->speak_time;
+        ROS_INFO_STREAM("start: " << start << ", end: " << end);
         const char * name = CPRC_abuf_trans_name(transcription_buffer); /* Label, type dependent */
         if (CPRC_abuf_trans_type(transcription_buffer) == CPRC_ABUF_TRANS_PHONE)
         {
@@ -146,9 +161,9 @@ void CerevoiceTts::channelCallback(CPRC_abuf * audio_buffer, void * user_data)
           //node_handle_.createWallTimer(ros::Duration(end - start));
         }
 
-
-        //tts_object->action_server_.publishFeedback(f);
+        last_end = end;
     }
+    tts_object->speak_time = last_end;
   }
 }
 
@@ -323,6 +338,8 @@ void CerevoiceTts::executeCB(const cerevoice_tts_msgs::TtsGoalConstPtr &goal)
   else
     ROS_INFO("Will now use the default voice to synthesize the text: %s", goal->text.c_str());
 
+  speak_time = 0;
+
   // synthesize the text
   if(!CPRCEN_engine_channel_speak(engine_, channel_handle_, xml.c_str(), xml.length(), FLUSH_BUFFER))
   {
@@ -331,6 +348,7 @@ void CerevoiceTts::executeCB(const cerevoice_tts_msgs::TtsGoalConstPtr &goal)
     return;
   }
 
+
   // Wait till completion
   while(CPRC_sc_audio_busy(player_)){
     CPRC_sc_sleep_msecs(AUDIO_SLEEP_TIME);
@@ -338,6 +356,16 @@ void CerevoiceTts::executeCB(const cerevoice_tts_msgs::TtsGoalConstPtr &goal)
 
   if(action_server_.isActive())
     action_server_.setSucceeded(result);
+
+  ROS_WARN_STREAM("Checking pending timers, there are " << timers_.size() << " timers.");
+  for(int i=0;i < timers_.size();i++){
+     // while a timer is pending to fire up
+     // a feedback message, wait
+     while (timers_[i].hasPending()){
+         ROS_WARN_STREAM("timer " << i << " hasPending...");
+          sleep(0.02);
+     }
+  }
 
   timers_.clear();
 }
